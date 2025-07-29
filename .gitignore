@@ -4,3 +4,4 @@ outputs/
 wandb
 openai_api.txt
 .idea/
+.vscode/

@@ -7,18 +7,15 @@ from isaacgym import gymtorch
 from isaacgym import gymapi
 from isaacgym.torch_utils import *
 
-from isaacgymenvs.utils.torch_jit_utils import *
 from isaacgymenvs.tasks.base.vec_task import VecTask
 
 
-class ShadowHandGPT(VecTask):
+class AllegroHandGPT(VecTask):
 
     def __init__(self, cfg, rl_device, sim_device, graphics_device_id, headless, virtual_screen_capture, force_render):
 
         self.cfg = cfg
 
-        self.randomize = self.cfg["task"]["randomize"]
-        self.randomization_params = self.cfg["task"]["randomization_params"]
         self.aggregate_mode = self.cfg["env"]["aggregateMode"]
 
         self.dist_reward_scale = self.cfg["env"]["distRewardScale"]
@@ -73,23 +70,19 @@ class ShadowHandGPT(VecTask):
 
         self.obs_type = self.cfg["env"]["observationType"]
 
-        if not (self.obs_type in ["openai", "full_no_vel", "full", "full_state"]):
+        if not (self.obs_type in ["full_no_vel", "full", "full_state"]):
             raise Exception(
                 "Unknown type of observations!\nobservationType should be one of: [openai, full_no_vel, full, full_state]")
 
         print("Obs type:", self.obs_type)
 
         self.num_obs_dict = {
-            "openai": 42,
-            "full_no_vel": 77,
-            "full": 157,
-            "full_state": 211
+            "full_no_vel": 50,
+            "full": 72,
+            "full_state": 88
         }
 
         self.up_axis = 'z'
-
-        self.fingertips = ["robot0:ffdistal", "robot0:mfdistal", "robot0:rfdistal", "robot0:lfdistal", "robot0:thdistal"]
-        self.num_fingertips = len(self.fingertips)
 
         self.use_vel_obs = False
         self.fingertip_obs = True
@@ -97,11 +90,11 @@ class ShadowHandGPT(VecTask):
 
         num_states = 0
         if self.asymmetric_obs:
-            num_states = 211
+            num_states = 88
 
         self.cfg["env"]["numObservations"] = self.num_obs_dict[self.obs_type]
         self.cfg["env"]["numStates"] = num_states
-        self.cfg["env"]["numActions"] = 20
+        self.cfg["env"]["numActions"] = 16
 
         super().__init__(config=self.cfg, rl_device=rl_device, sim_device=sim_device, graphics_device_id=graphics_device_id, headless=headless, virtual_screen_capture=virtual_screen_capture, force_render=force_render)
 
@@ -113,10 +106,8 @@ class ShadowHandGPT(VecTask):
             print("New episode length: ", self.max_episode_length)
 
         if self.viewer != None:
-            # cam_pos = gymapi.Vec3(10.0, 5.0, 1.0)
-            # cam_target = gymapi.Vec3(6.0, 5.0, 0.0)
-            cam_pos = gymapi.Vec3(0.25, -0.8, 1.05)
-            cam_target = gymapi.Vec3(-0.05, -0.2, 0)
+            cam_pos = gymapi.Vec3(10.0, 5.0, 1.0)
+            cam_target = gymapi.Vec3(6.0, 5.0, 0.0)
             self.gym.viewer_camera_look_at(self.viewer, None, cam_pos, cam_target)
 
         actor_root_state_tensor = self.gym.acquire_actor_root_state_tensor(self.sim)
@@ -124,11 +115,9 @@ class ShadowHandGPT(VecTask):
         rigid_body_tensor = self.gym.acquire_rigid_body_state_tensor(self.sim)
 
         if self.obs_type == "full_state" or self.asymmetric_obs:
-            sensor_tensor = self.gym.acquire_force_sensor_tensor(self.sim)
-            self.vec_sensor_tensor = gymtorch.wrap_tensor(sensor_tensor).view(self.num_envs, self.num_fingertips * 6)
 
-            dof_force_tensor = self.gym.acquire_dof_force_tensor(self.sim)
-            self.dof_force_tensor = gymtorch.wrap_tensor(dof_force_tensor).view(self.num_envs, self.num_shadow_hand_dofs)
+             dof_force_tensor = self.gym.acquire_dof_force_tensor(self.sim)
+             self.dof_force_tensor = gymtorch.wrap_tensor(dof_force_tensor).view(self.num_envs, self.num_shadow_hand_dofs)
 
         self.gym.refresh_actor_root_state_tensor(self.sim)
         self.gym.refresh_dof_state_tensor(self.sim)
@@ -146,6 +135,8 @@ class ShadowHandGPT(VecTask):
         self.root_state_tensor = gymtorch.wrap_tensor(actor_root_state_tensor).view(-1, 13)
 
         self.num_dofs = self.gym.get_sim_dof_count(self.sim) // self.num_envs
+        print("Num dofs: ", self.num_dofs)
+
         self.prev_targets = torch.zeros((self.num_envs, self.num_dofs), dtype=torch.float, device=self.device)
         self.cur_targets = torch.zeros((self.num_envs, self.num_dofs), dtype=torch.float, device=self.device)
 
@@ -171,15 +162,12 @@ class ShadowHandGPT(VecTask):
         self.rb_forces = torch.zeros((self.num_envs, self.num_bodies, 3), dtype=torch.float, device=self.device)
 
     def create_sim(self):
-        self.dt = self.cfg["sim"]["dt"]
-        self.up_axis_idx = 2 if self.up_axis == 'z' else 1 # index of up axis: Y=1, Z=2
+        self.dt = self.sim_params.dt
+        self.up_axis_idx = 2 # index of up axis: Y=1, Z=2
 
         self.sim = super().create_sim(self.device_id, self.graphics_device_id, self.physics_engine, self.sim_params)
         self._create_ground_plane()
         self._create_envs(self.num_envs, self.cfg["env"]['envSpacing'], int(np.sqrt(self.num_envs)))
-
-        if self.randomize:
-            self.apply_randomizations(self.randomization_params)
 
     def _create_ground_plane(self):
         plane_params = gymapi.PlaneParams()
@@ -190,11 +178,12 @@ class ShadowHandGPT(VecTask):
         lower = gymapi.Vec3(-spacing, -spacing, 0.0)
         upper = gymapi.Vec3(spacing, spacing, spacing)
 
-        asset_root = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), '../../assets'))
-        shadow_hand_asset_file = os.path.normpath("mjcf/open_ai_assets/hand/shadow_hand.xml")
+        asset_root = os.path.join(os.path.dirname(os.path.abspath(__file__)), '../../assets')
+        shadow_hand_asset_file = "urdf/kuka_allegro_description/allegro.urdf"
 
         if "asset" in self.cfg["env"]:
-            shadow_hand_asset_file = os.path.normpath(self.cfg["env"]["asset"].get("assetFileName", shadow_hand_asset_file))
+            asset_root = self.cfg["env"]["asset"].get("assetRoot", asset_root)
+            shadow_hand_asset_file = self.cfg["env"]["asset"].get("assetFileName", shadow_hand_asset_file)
 
         object_asset_file = self.asset_files_dict[self.object_type]
 
@@ -208,30 +197,17 @@ class ShadowHandGPT(VecTask):
 
         if self.physics_engine == gymapi.SIM_PHYSX:
             asset_options.use_physx_armature = True
-        asset_options.default_dof_drive_mode = gymapi.DOF_MODE_NONE
+        asset_options.default_dof_drive_mode = gymapi.DOF_MODE_POS
 
         shadow_hand_asset = self.gym.load_asset(self.sim, asset_root, shadow_hand_asset_file, asset_options)
 
         self.num_shadow_hand_bodies = self.gym.get_asset_rigid_body_count(shadow_hand_asset)
         self.num_shadow_hand_shapes = self.gym.get_asset_rigid_shape_count(shadow_hand_asset)
         self.num_shadow_hand_dofs = self.gym.get_asset_dof_count(shadow_hand_asset)
-        self.num_shadow_hand_actuators = self.gym.get_asset_actuator_count(shadow_hand_asset)
-        self.num_shadow_hand_tendons = self.gym.get_asset_tendon_count(shadow_hand_asset)
+        print("Num dofs: ", self.num_shadow_hand_dofs)
+        self.num_shadow_hand_actuators = self.num_shadow_hand_dofs #self.gym.get_asset_actuator_count(shadow_hand_asset)
 
-        limit_stiffness = 30
-        t_damping = 0.1
-        relevant_tendons = ["robot0:T_FFJ1c", "robot0:T_MFJ1c", "robot0:T_RFJ1c", "robot0:T_LFJ1c"]
-        tendon_props = self.gym.get_asset_tendon_properties(shadow_hand_asset)
-
-        for i in range(self.num_shadow_hand_tendons):
-            for rt in relevant_tendons:
-                if self.gym.get_asset_tendon_name(shadow_hand_asset, i) == rt:
-                    tendon_props[i].limit_stiffness = limit_stiffness
-                    tendon_props[i].damping = t_damping
-        self.gym.set_asset_tendon_properties(shadow_hand_asset, tendon_props)
-
-        actuated_dof_names = [self.gym.get_asset_actuator_joint_name(shadow_hand_asset, i) for i in range(self.num_shadow_hand_actuators)]
-        self.actuated_dof_indices = [self.gym.find_asset_dof_index(shadow_hand_asset, name) for name in actuated_dof_names]
+        self.actuated_dof_indices = [i for i in range(self.num_shadow_hand_dofs)]
 
         shadow_hand_dof_props = self.gym.get_asset_dof_properties(shadow_hand_asset)
 
@@ -239,6 +215,8 @@ class ShadowHandGPT(VecTask):
         self.shadow_hand_dof_upper_limits = []
         self.shadow_hand_dof_default_pos = []
         self.shadow_hand_dof_default_vel = []
+        self.sensors = []
+        sensor_pose = gymapi.Transform()
 
         for i in range(self.num_shadow_hand_dofs):
             self.shadow_hand_dof_lower_limits.append(shadow_hand_dof_props['lower'][i])
@@ -246,18 +224,18 @@ class ShadowHandGPT(VecTask):
             self.shadow_hand_dof_default_pos.append(0.0)
             self.shadow_hand_dof_default_vel.append(0.0)
 
+            print("Max effort: ", shadow_hand_dof_props['effort'][i])
+            shadow_hand_dof_props['effort'][i] = 0.5
+            shadow_hand_dof_props['stiffness'][i] = 3
+            shadow_hand_dof_props['damping'][i] = 0.1
+            shadow_hand_dof_props['friction'][i] = 0.01
+            shadow_hand_dof_props['armature'][i] = 0.001
+
         self.actuated_dof_indices = to_torch(self.actuated_dof_indices, dtype=torch.long, device=self.device)
         self.shadow_hand_dof_lower_limits = to_torch(self.shadow_hand_dof_lower_limits, device=self.device)
         self.shadow_hand_dof_upper_limits = to_torch(self.shadow_hand_dof_upper_limits, device=self.device)
         self.shadow_hand_dof_default_pos = to_torch(self.shadow_hand_dof_default_pos, device=self.device)
         self.shadow_hand_dof_default_vel = to_torch(self.shadow_hand_dof_default_vel, device=self.device)
-
-        self.fingertip_handles = [self.gym.find_asset_rigid_body_index(shadow_hand_asset, name) for name in self.fingertips]
-
-        if self.obs_type == "full_state" or self.asymmetric_obs:
-            sensor_pose = gymapi.Transform()
-            for ft_handle in self.fingertip_handles:
-                self.gym.create_asset_force_sensor(shadow_hand_asset, ft_handle, sensor_pose)
 
         object_asset_options = gymapi.AssetOptions()
         object_asset = self.gym.load_asset(self.sim, asset_root, object_asset_file, object_asset_options)
@@ -267,11 +245,12 @@ class ShadowHandGPT(VecTask):
 
         shadow_hand_start_pose = gymapi.Transform()
         shadow_hand_start_pose.p = gymapi.Vec3(*get_axis_params(0.5, self.up_axis_idx))
+        shadow_hand_start_pose.r = gymapi.Quat.from_axis_angle(gymapi.Vec3(0, 1, 0), np.pi) * gymapi.Quat.from_axis_angle(gymapi.Vec3(1, 0, 0), 0.47 * np.pi) * gymapi.Quat.from_axis_angle(gymapi.Vec3(0, 0, 1), 0.25 * np.pi)
 
         object_start_pose = gymapi.Transform()
         object_start_pose.p = gymapi.Vec3()
         object_start_pose.p.x = shadow_hand_start_pose.p.x
-        pose_dy, pose_dz = -0.39, 0.10  
+        pose_dy, pose_dz = -0.2, 0.06
 
         object_start_pose.p.y = shadow_hand_start_pose.p.y + pose_dy
         object_start_pose.p.z = shadow_hand_start_pose.p.z + pose_dz
@@ -301,7 +280,6 @@ class ShadowHandGPT(VecTask):
         self.object_indices = []
         self.goal_object_indices = []
 
-        self.fingertip_handles = [self.gym.find_asset_rigid_body_index(shadow_hand_asset, name) for name in self.fingertips]
 
         shadow_hand_rb_count = self.gym.get_asset_rigid_body_count(shadow_hand_asset)
         object_rb_count = self.gym.get_asset_rigid_body_count(object_asset)
@@ -323,8 +301,7 @@ class ShadowHandGPT(VecTask):
             hand_idx = self.gym.get_actor_index(env_ptr, shadow_hand_actor, gymapi.DOMAIN_SIM)
             self.hand_indices.append(hand_idx)
 
-            if self.obs_type == "full_state" or self.asymmetric_obs:
-                self.gym.enable_actor_dof_force_sensors(env_ptr, shadow_hand_actor)
+
 
             object_handle = self.gym.create_actor(env_ptr, object_asset, object_start_pose, "object", i, 0, 0)
             self.object_init_state.append([object_start_pose.p.x, object_start_pose.p.y, object_start_pose.p.z,
@@ -358,7 +335,6 @@ class ShadowHandGPT(VecTask):
         self.goal_init_state = self.goal_states.clone()
         self.hand_start_states = to_torch(self.hand_start_states, device=self.device).view(self.num_envs, 13)
 
-        self.fingertip_handles = to_torch(self.fingertip_handles, dtype=torch.long, device=self.device)
         self.object_rb_handles = to_torch(self.object_rb_handles, dtype=torch.long, device=self.device)
         self.object_rb_masses = to_torch(self.object_rb_masses, dtype=torch.float, device=self.device)
 
@@ -415,69 +391,44 @@ class ShadowHandGPT(VecTask):
         self.goal_pos = self.goal_states[:, 0:3]
         self.goal_rot = self.goal_states[:, 3:7]
 
-        self.fingertip_state = self.rigid_body_states[:, self.fingertip_handles][:, :, 0:13]
-        self.fingertip_pos = self.rigid_body_states[:, self.fingertip_handles][:, :, 0:3]
 
-        if self.obs_type == "openai":
-            self.compute_fingertip_observations(True)
-        elif self.obs_type == "full_no_vel":
+        if self.obs_type == "full_no_vel":
             self.compute_full_observations(True)
         elif self.obs_type == "full":
             self.compute_full_observations()
         elif self.obs_type == "full_state":
-            self.compute_full_state()
+             self.compute_full_state()
         else:
             print("Unknown observations type!")
 
         if self.asymmetric_obs:
             self.compute_full_state(True)
 
-    def compute_fingertip_observations(self, no_vel=False):
-        if no_vel:
-
-            self.obs_buf[:, 0:15] = self.fingertip_pos.reshape(self.num_envs, 15)
-            self.obs_buf[:, 15:18] = self.object_pose[:, 0:3]
-            self.obs_buf[:, 18:22] = quat_mul(self.object_rot, quat_conjugate(self.goal_rot))
-
-            self.obs_buf[:, 22:42] = self.actions
-        else:
-            self.obs_buf[:, 0:65] = self.fingertip_state.reshape(self.num_envs, 65)
-            self.obs_buf[:, 65:72] = self.object_pose
-            self.obs_buf[:, 72:75] = self.object_linvel
-            self.obs_buf[:, 75:78] = self.vel_obs_scale * self.object_angvel
-
-            self.obs_buf[:, 78:85] = self.goal_pose
-            self.obs_buf[:, 85:89] = quat_mul(self.object_rot, quat_conjugate(self.goal_rot))
-
-            self.obs_buf[:, 89:109] = self.actions
-
     def compute_full_observations(self, no_vel=False):
         if no_vel:
             self.obs_buf[:, 0:self.num_shadow_hand_dofs] = unscale(self.shadow_hand_dof_pos,
                                                                    self.shadow_hand_dof_lower_limits, self.shadow_hand_dof_upper_limits)
 
-            self.obs_buf[:, 24:31] = self.object_pose
-            self.obs_buf[:, 31:38] = self.goal_pose
-            self.obs_buf[:, 38:42] = quat_mul(self.object_rot, quat_conjugate(self.goal_rot))
+            self.obs_buf[:, 16:23] = self.object_pose
+            self.obs_buf[:, 23:30] = self.goal_pose
+            self.obs_buf[:, 30:34] = quat_mul(self.object_rot, quat_conjugate(self.goal_rot))
 
-            self.obs_buf[:, 42:57] = self.fingertip_pos.reshape(self.num_envs, 15)
 
-            self.obs_buf[:, 57:77] = self.actions
+            self.obs_buf[:, 34:50] = self.actions
         else:
             self.obs_buf[:, 0:self.num_shadow_hand_dofs] = unscale(self.shadow_hand_dof_pos,
                                                                    self.shadow_hand_dof_lower_limits, self.shadow_hand_dof_upper_limits)
             self.obs_buf[:, self.num_shadow_hand_dofs:2*self.num_shadow_hand_dofs] = self.vel_obs_scale * self.shadow_hand_dof_vel
 
-            self.obs_buf[:, 48:55] = self.object_pose
-            self.obs_buf[:, 55:58] = self.object_linvel
-            self.obs_buf[:, 58:61] = self.vel_obs_scale * self.object_angvel
+            self.obs_buf[:, 32:39] = self.object_pose
+            self.obs_buf[:, 39:42] = self.object_linvel
+            self.obs_buf[:, 42:45] = self.vel_obs_scale * self.object_angvel
 
-            self.obs_buf[:, 61:68] = self.goal_pose
-            self.obs_buf[:, 68:72] = quat_mul(self.object_rot, quat_conjugate(self.goal_rot))
+            self.obs_buf[:, 45:52] = self.goal_pose
+            self.obs_buf[:, 52:56] = quat_mul(self.object_rot, quat_conjugate(self.goal_rot))
 
-            self.obs_buf[:, 72:137] = self.fingertip_state.reshape(self.num_envs, 65)
 
-            self.obs_buf[:, 137:157] = self.actions
+            self.obs_buf[:, 56:72] = self.actions
 
     def compute_full_state(self, asymm_obs=False):
         if asymm_obs:
@@ -486,49 +437,39 @@ class ShadowHandGPT(VecTask):
             self.states_buf[:, self.num_shadow_hand_dofs:2*self.num_shadow_hand_dofs] = self.vel_obs_scale * self.shadow_hand_dof_vel
             self.states_buf[:, 2*self.num_shadow_hand_dofs:3*self.num_shadow_hand_dofs] = self.force_torque_obs_scale * self.dof_force_tensor
 
-            obj_obs_start = 3*self.num_shadow_hand_dofs  # 72
+            obj_obs_start = 3*self.num_shadow_hand_dofs  # 48
             self.states_buf[:, obj_obs_start:obj_obs_start + 7] = self.object_pose
             self.states_buf[:, obj_obs_start + 7:obj_obs_start + 10] = self.object_linvel
             self.states_buf[:, obj_obs_start + 10:obj_obs_start + 13] = self.vel_obs_scale * self.object_angvel
 
-            goal_obs_start = obj_obs_start + 13  # 85
+            goal_obs_start = obj_obs_start + 13  # 61
             self.states_buf[:, goal_obs_start:goal_obs_start + 7] = self.goal_pose
             self.states_buf[:, goal_obs_start + 7:goal_obs_start + 11] = quat_mul(self.object_rot, quat_conjugate(self.goal_rot))
 
-            num_ft_states = 13 * self.num_fingertips  # 65
-            num_ft_force_torques = 6 * self.num_fingertips  # 30
 
-            fingertip_obs_start = goal_obs_start + 11  # 96
-            self.states_buf[:, fingertip_obs_start:fingertip_obs_start + num_ft_states] = self.fingertip_state.reshape(self.num_envs, num_ft_states)
-            self.states_buf[:, fingertip_obs_start + num_ft_states:fingertip_obs_start + num_ft_states +
-                            num_ft_force_torques] = self.force_torque_obs_scale * self.vec_sensor_tensor
+            fingertip_obs_start = goal_obs_start + 11  # 72
 
-            obs_end = fingertip_obs_start + num_ft_states + num_ft_force_torques
+            obs_end = fingertip_obs_start #+ num_ft_states + num_ft_force_torques
             self.states_buf[:, obs_end:obs_end + self.num_actions] = self.actions
         else:
             self.obs_buf[:, 0:self.num_shadow_hand_dofs] = unscale(self.shadow_hand_dof_pos,
-                                                                   self.shadow_hand_dof_lower_limits, self.shadow_hand_dof_upper_limits)
+                                                                      self.shadow_hand_dof_lower_limits, self.shadow_hand_dof_upper_limits)
             self.obs_buf[:, self.num_shadow_hand_dofs:2*self.num_shadow_hand_dofs] = self.vel_obs_scale * self.shadow_hand_dof_vel
             self.obs_buf[:, 2*self.num_shadow_hand_dofs:3*self.num_shadow_hand_dofs] = self.force_torque_obs_scale * self.dof_force_tensor
 
-            obj_obs_start = 3*self.num_shadow_hand_dofs  # 72
+            obj_obs_start = 3*self.num_shadow_hand_dofs  # 48
             self.obs_buf[:, obj_obs_start:obj_obs_start + 7] = self.object_pose
             self.obs_buf[:, obj_obs_start + 7:obj_obs_start + 10] = self.object_linvel
             self.obs_buf[:, obj_obs_start + 10:obj_obs_start + 13] = self.vel_obs_scale * self.object_angvel
 
-            goal_obs_start = obj_obs_start + 13  # 85
+            goal_obs_start = obj_obs_start + 13  # 61
             self.obs_buf[:, goal_obs_start:goal_obs_start + 7] = self.goal_pose
             self.obs_buf[:, goal_obs_start + 7:goal_obs_start + 11] = quat_mul(self.object_rot, quat_conjugate(self.goal_rot))
 
-            num_ft_states = 13 * self.num_fingertips  # 65
-            num_ft_force_torques = 6 * self.num_fingertips  # 30
 
-            fingertip_obs_start = goal_obs_start + 11  # 96
-            self.obs_buf[:, fingertip_obs_start:fingertip_obs_start + num_ft_states] = self.fingertip_state.reshape(self.num_envs, num_ft_states)
-            self.obs_buf[:, fingertip_obs_start + num_ft_states:fingertip_obs_start + num_ft_states +
-                         num_ft_force_torques] = self.force_torque_obs_scale * self.vec_sensor_tensor
+            fingertip_obs_start = goal_obs_start + 11  # 72
 
-            obs_end = fingertip_obs_start + num_ft_states + num_ft_force_torques
+            obs_end = fingertip_obs_start #+ num_ft_states + num_ft_force_torques
             self.obs_buf[:, obs_end:obs_end + self.num_actions] = self.actions
 
     def reset_target_pose(self, env_ids, apply_reset=False):
@@ -550,9 +491,6 @@ class ShadowHandGPT(VecTask):
         self.reset_goal_buf[env_ids] = 0
 
     def reset_idx(self, env_ids, goal_env_ids):
-        if self.randomize:
-            self.apply_randomizations(self.randomization_params)
-
         rand_floats = torch_rand_float(-1.0, 1.0, (len(env_ids), self.num_shadow_hand_dofs * 2 + 5), device=self.device)
 
         self.reset_target_pose(env_ids)
@@ -614,6 +552,7 @@ class ShadowHandGPT(VecTask):
 
         if len(goal_env_ids) > 0 and len(env_ids) == 0:
             self.reset_target_pose(goal_env_ids, apply_reset=True)
+
         elif len(goal_env_ids) > 0:
             self.reset_target_pose(goal_env_ids)
 
@@ -724,10 +663,12 @@ def compute_success(
     if max_consecutive_successes > 0:
         progress_buf = torch.where(torch.abs(rot_dist) <= success_tolerance, torch.zeros_like(progress_buf), progress_buf)
         resets = torch.where(successes >= max_consecutive_successes, torch.ones_like(resets), resets)
-    resets = torch.where(progress_buf >= max_episode_length - 1, torch.ones_like(resets), resets)
+
+    timed_out = progress_buf >= max_episode_length - 1
+    resets = torch.where(timed_out, torch.ones_like(resets), resets)
 
     if max_consecutive_successes > 0:
-        reward = torch.where(progress_buf >= max_episode_length - 1, reward + 0.5 * fall_penalty, reward)
+        reward = torch.where(timed_out, reward + 0.5 * fall_penalty, reward)
 
     num_resets = torch.sum(resets)
     finished_cons_successes = torch.sum(successes * resets.float())
@@ -757,31 +698,41 @@ def compute_bonus(
     reward = torch.where(goal_resets == 1, rew_buf + reach_goal_bonus, rew_buf)
 
     return reward
-
 from typing import Tuple, Dict
 import math
 import torch
 from torch import Tensor
 @torch.jit.script
 def compute_reward(object_rot: torch.Tensor, goal_rot: torch.Tensor, object_angvel: torch.Tensor) -> Tuple[torch.Tensor, Dict[str, torch.Tensor]]:
-    # Define temperature parameters for the transformation functions
-    temperature_rot = torch.tensor(0.1)
-    temperature_angvel = torch.tensor(0.1)
+    object_rot_norm = torch.linalg.norm(object_rot, dim=-1)
+    goal_rot_norm = torch.linalg.norm(goal_rot, dim=-1)
 
-    # Compute the distance between the current and goal orientations
-    rot_diff = torch.norm(object_rot - goal_rot, dim=-1)
+    # normalize the rotations
+    object_rot_normalized = object_rot / object_rot_norm.unsqueeze(-1)
+    goal_rot_normalized = goal_rot / goal_rot_norm.unsqueeze(-1)
 
-    # We want to encourage the agent to spin the object, so we will give a negative reward proportional to the angular velocity
-    angvel_penalty = torch.norm(object_angvel, dim=-1)
+    # compute the distance between the orientations
+    rotation_distance = 1.0 - (object_rot_normalized * goal_rot_normalized).sum(dim=-1)
 
-    # Now we transform the reward components using the exponential function
-    rot_reward = torch.exp(-temperature_rot * rot_diff)
-    velocity_penalty = torch.exp(-temperature_angvel * angvel_penalty)
+    # we want to minimize the rotational distance, so the reward is the negative distance
+    rotation_reward = -rotation_distance
 
-    # Combine the reward components
-    reward = rot_reward - velocity_penalty
+    # calculate angular speed reward
+    angular_speed = torch.linalg.norm(object_angvel, dim=-1)
+    # add reward for faster spins
+    speed_reward = angular_speed
+    
+    # consider the spinning direction, reduce the reward if the spinning direction is wrong
+    correct_direction = (object_rot_normalized[1:] * goal_rot_normalized[1:]).sum(dim=-1)
+    speed_reward = speed_reward * torch.sign(correct_direction)
+    
+    # normalize speed reward to [0, 1] range
+    speed_reward = (speed_reward - speed_reward.min()) / (speed_reward.max() - speed_reward.min())
 
-    # Store the components for tracking
-    reward_components = {"rot_reward": rot_reward, "velocity_penalty": velocity_penalty}
+    reward_components = {
+        "rotation_reward": rotation_reward,
+        "speed_reward": speed_reward
+    }
+    total_reward = rotation_reward + speed_reward
 
-    return reward, reward_components
+    return total_reward, reward_components
