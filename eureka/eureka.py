@@ -25,7 +25,17 @@ def main(cfg):
     logging.info(f"Workspace: {workspace_dir}")
     logging.info(f"Project Root: {EUREKA_ROOT_DIR}")
 
-    openai.api_key = os.getenv("OPENAI_API_KEY")
+    # read f"{EUREKA_ROOT_DIR}/openai_api.txt"
+    # Build the path to the key file
+    api_key_path = os.path.abspath(
+        os.path.join(EUREKA_ROOT_DIR, "../openai_api.txt")
+    )
+    # Read the file and strip any trailing newline/whitespace
+    try:
+        with open(api_key_path, "r", encoding="utf-8") as f:
+            openai.api_key = f.read().strip()
+    except FileNotFoundError:
+        raise FileNotFoundError(f"Could not find API key file at {api_key_path}")
 
     task = cfg.env.task
     task_description = cfg.env.description
