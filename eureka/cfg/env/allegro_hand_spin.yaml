@@ -1,0 +1,3 @@
+task: AllegroHandSpin
+env_name: allegro_hand_spin
+description: to make the allegro hand spin the pen to a target orientation

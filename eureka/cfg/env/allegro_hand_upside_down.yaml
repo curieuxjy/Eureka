@@ -1,0 +1,3 @@
+task: AllegroHandUpsideDown
+env_name: allegro_hand_upside_down
+description: to make the allegro hand, whose palm faces down, spin the object to a target orientation; 

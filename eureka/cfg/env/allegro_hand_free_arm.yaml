@@ -1,0 +1,3 @@
+task: AllegroHandFreeArm
+env_name: allegro_hand_free_arm
+description: to make the allegro hand, whose arm is not fixed, spin the object to a target orientation; 

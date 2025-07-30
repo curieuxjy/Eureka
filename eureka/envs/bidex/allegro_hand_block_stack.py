@@ -13,7 +13,7 @@ from isaacgymenvs.utils.torch_jit_utils import *
 from isaacgymenvs.tasks.base.vec_task import VecTask
 
 
-class ShadowHandBlockStack(VecTask):
+class AllegroHandBlockStack(VecTask):
 
     def __init__(self, cfg, rl_device, sim_device, graphics_device_id, headless, virtual_screen_capture, force_render):
         self.cfg = cfg
@@ -40,7 +40,7 @@ class ShadowHandBlockStack(VecTask):
         self.reset_dof_pos_noise = self.cfg["env"]["resetDofPosRandomInterval"]
         self.reset_dof_vel_noise = self.cfg["env"]["resetDofVelRandomInterval"]
 
-        self.shadow_hand_dof_speed_scale = self.cfg["env"]["dofSpeedScale"]
+        self.allegro_dof_speed_scale = self.cfg["env"]["dofSpeedScale"]
         self.use_relative_control = self.cfg["env"]["useRelativeControl"]
         self.act_moving_average = self.cfg["env"]["actionsMovingAverage"]
 
@@ -93,8 +93,8 @@ class ShadowHandBlockStack(VecTask):
         self.num_hand_obs = 72 + 95 + 26 + 6
         self.up_axis = 'z'
 
-        self.fingertips = ["robot0:ffdistal", "robot0:mfdistal", "robot0:rfdistal", "robot0:lfdistal", "robot0:thdistal"]
-        self.a_fingertips = ["robot1:ffdistal", "robot1:mfdistal", "robot1:rfdistal", "robot1:lfdistal", "robot1:thdistal"]
+        self.fingertips = ["robot0:link_15.0_tip", "robot0:link_3.0_tip", "robot0:link_7.0_tip", "robot0:link_11.0_tip", "robot0:link_15.0_tip"]
+        self.a_fingertips = ["robot1:link_15.0_tip", "robot1:link_3.0_tip", "robot1:link_7.0_tip", "robot1:link_11.0_tip", "robot1:link_15.0_tip"]
         self.num_fingertips = len(self.fingertips) * 2
 
         self.use_vel_obs = False
@@ -139,25 +139,25 @@ class ShadowHandBlockStack(VecTask):
         self.vec_sensor_tensor = gymtorch.wrap_tensor(sensor_tensor).view(self.num_envs, self.num_fingertips * 6)
 
         dof_force_tensor = self.gym.acquire_dof_force_tensor(self.sim)
-        self.dof_force_tensor = gymtorch.wrap_tensor(dof_force_tensor).view(self.num_envs, self.num_shadow_hand_dofs * 2 + self.num_object_dofs * 2)
+        self.dof_force_tensor = gymtorch.wrap_tensor(dof_force_tensor).view(self.num_envs, self.num_allegro_hand_dofs * 2 + self.num_object_dofs * 2)
         self.dof_force_tensor = self.dof_force_tensor[:, :48]
 
         self.gym.refresh_actor_root_state_tensor(self.sim)
         self.gym.refresh_dof_state_tensor(self.sim)
         self.gym.refresh_rigid_body_state_tensor(self.sim)
 
-        self.shadow_hand_default_dof_pos = torch.zeros(self.num_shadow_hand_dofs, dtype=torch.float, device=self.device)
+        self.allegro_hand_default_dof_pos = torch.zeros(self.num_allegro_hand_dofs, dtype=torch.float, device=self.device)
 
         self.dof_state = gymtorch.wrap_tensor(dof_state_tensor)
-        self.shadow_hand_dof_state = self.dof_state.view(self.num_envs, -1, 2)[:, :self.num_shadow_hand_dofs]
-        self.shadow_hand_dof_pos = self.shadow_hand_dof_state[..., 0]
-        self.shadow_hand_dof_vel = self.shadow_hand_dof_state[..., 1]
+        self.allegro_hand_dof_state = self.dof_state.view(self.num_envs, -1, 2)[:, :self.num_allegro_hand_dofs]
+        self.allegro_hand_dof_pos = self.allegro_hand_dof_state[..., 0]
+        self.allegro_hand_dof_vel = self.allegro_hand_dof_state[..., 1]
 
-        self.shadow_hand_another_dof_state = self.dof_state.view(self.num_envs, -1, 2)[:, self.num_shadow_hand_dofs:self.num_shadow_hand_dofs*2]
-        self.shadow_hand_another_dof_pos = self.shadow_hand_another_dof_state[..., 0]
-        self.shadow_hand_another_dof_vel = self.shadow_hand_another_dof_state[..., 1]
+        self.allegro_hand_another_dof_state = self.dof_state.view(self.num_envs, -1, 2)[:, self.num_allegro_hand_dofs:self.num_allegro_hand_dofs*2]
+        self.allegro_hand_another_dof_pos = self.allegro_hand_another_dof_state[..., 0]
+        self.allegro_hand_another_dof_vel = self.allegro_hand_another_dof_state[..., 1]
 
-        self.object_dof_state = self.dof_state.view(self.num_envs, -1, 2)[:, self.num_shadow_hand_dofs*2:self.num_shadow_hand_dofs*2 + self.num_object_dofs]
+        self.object_dof_state = self.dof_state.view(self.num_envs, -1, 2)[:, self.num_allegro_hand_dofs*2:self.num_allegro_hand_dofs*2 + self.num_object_dofs]
         self.object_dof_pos = self.object_dof_state[..., 0]
 
         self.rigid_body_states = gymtorch.wrap_tensor(rigid_body_tensor).view(self.num_envs, -1, 13)
@@ -209,13 +209,13 @@ class ShadowHandBlockStack(VecTask):
         upper = gymapi.Vec3(spacing, spacing, spacing)
 
         asset_root = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), '../../assets'))
-        shadow_hand_asset_file = "mjcf/open_ai_assets/hand/shadow_hand.xml"
-        shadow_hand_another_asset_file = "mjcf/open_ai_assets/hand/shadow_hand1.xml"
+        allegro_hand_asset_file = "mjcf/open_ai_assets/hand/allegro_hand.xml"
+        allegro_hand_another_asset_file = "mjcf/open_ai_assets/hand/allegro_hand1.xml"
         table_texture_files = asset_root + "/" + "textures/texture_stone_stone_texture_0.jpg"
         table_texture_handle = self.gym.create_texture_from_file(self.sim, table_texture_files)
 
         if "asset" in self.cfg["env"]:
-            shadow_hand_asset_file = self.cfg["env"]["asset"].get("assetFileName", shadow_hand_asset_file)
+            allegro_hand_asset_file = self.cfg["env"]["asset"].get("assetFileName", allegro_hand_asset_file)
 
         object_asset_file = self.asset_files_dict[self.object_type]
 
@@ -232,64 +232,54 @@ class ShadowHandBlockStack(VecTask):
             asset_options.use_physx_armature = True
         asset_options.default_dof_drive_mode = gymapi.DOF_MODE_NONE
 
-        shadow_hand_asset = self.gym.load_asset(self.sim, asset_root, shadow_hand_asset_file, asset_options)
-        shadow_hand_another_asset = self.gym.load_asset(self.sim, asset_root, shadow_hand_another_asset_file, asset_options)
+        allegro_hand_asset = self.gym.load_asset(self.sim, asset_root, allegro_hand_asset_file, asset_options)
+        allegro_hand_another_asset = self.gym.load_asset(self.sim, asset_root, allegro_hand_another_asset_file, asset_options)
 
-        self.num_shadow_hand_bodies = self.gym.get_asset_rigid_body_count(shadow_hand_asset)
-        self.num_shadow_hand_shapes = self.gym.get_asset_rigid_shape_count(shadow_hand_asset)
-        self.num_shadow_hand_dofs = self.gym.get_asset_dof_count(shadow_hand_asset)
-        self.num_shadow_hand_actuators = self.gym.get_asset_actuator_count(shadow_hand_asset)
-        self.num_shadow_hand_tendons = self.gym.get_asset_tendon_count(shadow_hand_asset)
+        self.num_allegro_hand_bodies = self.gym.get_asset_rigid_body_count(allegro_hand_asset)
+        self.num_allegro_hand_shapes = self.gym.get_asset_rigid_shape_count(allegro_hand_asset)
+        self.num_allegro_hand_dofs = self.gym.get_asset_dof_count(allegro_hand_asset)
+        self.num_allegro_hand_actuators = self.gym.get_asset_actuator_count(allegro_hand_asset)
+        self.num_allegro_hand_tendons = self.gym.get_asset_tendon_count(allegro_hand_asset)
 
-        print("self.num_shadow_hand_bodies: ", self.num_shadow_hand_bodies)
-        print("self.num_shadow_hand_shapes: ", self.num_shadow_hand_shapes)
-        print("self.num_shadow_hand_dofs: ", self.num_shadow_hand_dofs)
-        print("self.num_shadow_hand_actuators: ", self.num_shadow_hand_actuators)
-        print("self.num_shadow_hand_tendons: ", self.num_shadow_hand_tendons)
+        print("self.num_allegro_hand_bodies: ", self.num_allegro_hand_bodies)
+        print("self.num_allegro_hand_shapes: ", self.num_allegro_hand_shapes)
+        print("self.num_allegro_hand_dofs: ", self.num_allegro_hand_dofs)
+        print("self.num_allegro_hand_actuators: ", self.num_allegro_hand_actuators)
+        print("self.num_allegro_hand_tendons: ", self.num_allegro_hand_tendons)
 
         limit_stiffness = 30
         t_damping = 0.1
-        relevant_tendons = ["robot0:T_FFJ1c", "robot0:T_MFJ1c", "robot0:T_RFJ1c", "robot0:T_LFJ1c"]
-        a_relevant_tendons = ["robot1:T_FFJ1c", "robot1:T_MFJ1c", "robot1:T_RFJ1c", "robot1:T_LFJ1c"]
-        tendon_props = self.gym.get_asset_tendon_properties(shadow_hand_asset)
-        a_tendon_props = self.gym.get_asset_tendon_properties(shadow_hand_another_asset)
+        relevant_tendons = []
+        a_relevant_tendons = []
+        tendon_props = self.gym.get_asset_tendon_properties(allegro_hand_asset)
+        a_tendon_props = self.gym.get_asset_tendon_properties(allegro_hand_another_asset)
 
-        for i in range(self.num_shadow_hand_tendons):
-            for rt in relevant_tendons:
-                if self.gym.get_asset_tendon_name(shadow_hand_asset, i) == rt:
-                    tendon_props[i].limit_stiffness = limit_stiffness
-                    tendon_props[i].damping = t_damping
-            for rt in a_relevant_tendons:
-                if self.gym.get_asset_tendon_name(shadow_hand_another_asset, i) == rt:
-                    a_tendon_props[i].limit_stiffness = limit_stiffness
-                    a_tendon_props[i].damping = t_damping
-        self.gym.set_asset_tendon_properties(shadow_hand_asset, tendon_props)
-        self.gym.set_asset_tendon_properties(shadow_hand_another_asset, a_tendon_props)
+        # Allegro hand does not use tendons
 
-        actuated_dof_names = [self.gym.get_asset_actuator_joint_name(shadow_hand_asset, i) for i in range(self.num_shadow_hand_actuators)]
-        self.actuated_dof_indices = [self.gym.find_asset_dof_index(shadow_hand_asset, name) for name in actuated_dof_names]
+        actuated_dof_names = [self.gym.get_asset_actuator_joint_name(allegro_hand_asset, i) for i in range(self.num_allegro_hand_actuators)]
+        self.actuated_dof_indices = [self.gym.find_asset_dof_index(allegro_hand_asset, name) for name in actuated_dof_names]
 
-        shadow_hand_dof_props = self.gym.get_asset_dof_properties(shadow_hand_asset)
-        shadow_hand_another_dof_props = self.gym.get_asset_dof_properties(shadow_hand_another_asset)
+        allegro_hand_dof_props = self.gym.get_asset_dof_properties(allegro_hand_asset)
+        allegro_hand_another_dof_props = self.gym.get_asset_dof_properties(allegro_hand_another_asset)
 
-        self.shadow_hand_dof_lower_limits = []
-        self.shadow_hand_dof_upper_limits = []
-        self.shadow_hand_dof_default_pos = []
-        self.shadow_hand_dof_default_vel = []
+        self.allegro_hand_dof_lower_limits = []
+        self.allegro_hand_dof_upper_limits = []
+        self.allegro_hand_dof_default_pos = []
+        self.allegro_hand_dof_default_vel = []
         self.sensors = []
         sensor_pose = gymapi.Transform()
 
-        for i in range(self.num_shadow_hand_dofs):
-            self.shadow_hand_dof_lower_limits.append(shadow_hand_dof_props['lower'][i])
-            self.shadow_hand_dof_upper_limits.append(shadow_hand_dof_props['upper'][i])
-            self.shadow_hand_dof_default_pos.append(0.0)
-            self.shadow_hand_dof_default_vel.append(0.0)
+        for i in range(self.num_allegro_hand_dofs):
+            self.allegro_hand_dof_lower_limits.append(allegro_hand_dof_props['lower'][i])
+            self.allegro_hand_dof_upper_limits.append(allegro_hand_dof_props['upper'][i])
+            self.allegro_hand_dof_default_pos.append(0.0)
+            self.allegro_hand_dof_default_vel.append(0.0)
 
         self.actuated_dof_indices = to_torch(self.actuated_dof_indices, dtype=torch.long, device=self.device)
-        self.shadow_hand_dof_lower_limits = to_torch(self.shadow_hand_dof_lower_limits, device=self.device)
-        self.shadow_hand_dof_upper_limits = to_torch(self.shadow_hand_dof_upper_limits, device=self.device)
-        self.shadow_hand_dof_default_pos = to_torch(self.shadow_hand_dof_default_pos, device=self.device)
-        self.shadow_hand_dof_default_vel = to_torch(self.shadow_hand_dof_default_vel, device=self.device)
+        self.allegro_hand_dof_lower_limits = to_torch(self.allegro_hand_dof_lower_limits, device=self.device)
+        self.allegro_hand_dof_upper_limits = to_torch(self.allegro_hand_dof_upper_limits, device=self.device)
+        self.allegro_hand_dof_default_pos = to_torch(self.allegro_hand_dof_default_pos, device=self.device)
+        self.allegro_hand_dof_default_vel = to_torch(self.allegro_hand_dof_default_vel, device=self.device)
 
         object_asset_options = gymapi.AssetOptions()
         object_asset_options.density = 100
@@ -361,10 +351,10 @@ class ShadowHandBlockStack(VecTask):
         table_pose.p = gymapi.Vec3(0.0, 0.0, 0.5 * table_dims.z)
         table_pose.r = gymapi.Quat().from_euler_zyx(-0., 0, 0)
 
-        max_agg_bodies = self.num_shadow_hand_bodies * 2 + 3 * self.num_object_bodies + 1
-        max_agg_shapes = self.num_shadow_hand_shapes * 2 + 3 * self.num_object_shapes + 1
+        max_agg_bodies = self.num_allegro_hand_bodies * 2 + 3 * self.num_object_bodies + 1
+        max_agg_shapes = self.num_allegro_hand_shapes * 2 + 3 * self.num_object_shapes + 1
 
-        self.shadow_hands = []
+        self.allegro_hands = []
         self.envs = []
 
         self.object_init_state = []
@@ -378,14 +368,14 @@ class ShadowHandBlockStack(VecTask):
         self.table_indices = []
         self.block_indices = []
 
-        self.fingertip_handles = [self.gym.find_asset_rigid_body_index(shadow_hand_asset, name) for name in self.fingertips]
-        self.fingertip_another_handles = [self.gym.find_asset_rigid_body_index(shadow_hand_another_asset, name) for name in self.a_fingertips]
+        self.fingertip_handles = [self.gym.find_asset_rigid_body_index(allegro_hand_asset, name) for name in self.fingertips]
+        self.fingertip_another_handles = [self.gym.find_asset_rigid_body_index(allegro_hand_another_asset, name) for name in self.a_fingertips]
 
         sensor_pose = gymapi.Transform()
         for ft_handle in self.fingertip_handles:
-            self.gym.create_asset_force_sensor(shadow_hand_asset, ft_handle, sensor_pose)
+            self.gym.create_asset_force_sensor(allegro_hand_asset, ft_handle, sensor_pose)
         for ft_a_handle in self.fingertip_another_handles:
-            self.gym.create_asset_force_sensor(shadow_hand_another_asset, ft_a_handle, sensor_pose)
+            self.gym.create_asset_force_sensor(allegro_hand_another_asset, ft_a_handle, sensor_pose)
 
         if self.obs_type in ["point_cloud"]:
             self.cameras = []
@@ -423,22 +413,22 @@ class ShadowHandBlockStack(VecTask):
                 self.gym.begin_aggregate(env_ptr, max_agg_bodies, max_agg_shapes, True)
 
 
-            shadow_hand_actor = self.gym.create_actor(env_ptr, shadow_hand_asset, shadow_hand_start_pose, "hand", i, 0, 0)
-            shadow_hand_another_actor = self.gym.create_actor(env_ptr, shadow_hand_another_asset, shadow_another_hand_start_pose, "another_hand", i, 0, 0)
+            allegro_hand_actor = self.gym.create_actor(env_ptr, allegro_hand_asset, shadow_hand_start_pose, "hand", i, 0, 0)
+            allegro_hand_another_actor = self.gym.create_actor(env_ptr, allegro_hand_another_asset, shadow_another_hand_start_pose, "another_hand", i, 0, 0)
 
             self.hand_start_states.append([shadow_hand_start_pose.p.x, shadow_hand_start_pose.p.y, shadow_hand_start_pose.p.z,
                                            shadow_hand_start_pose.r.x, shadow_hand_start_pose.r.y, shadow_hand_start_pose.r.z, shadow_hand_start_pose.r.w,
                                            0, 0, 0, 0, 0, 0])
 
-            self.gym.set_actor_dof_properties(env_ptr, shadow_hand_actor, shadow_hand_dof_props)
-            hand_idx = self.gym.get_actor_index(env_ptr, shadow_hand_actor, gymapi.DOMAIN_SIM)
+            self.gym.set_actor_dof_properties(env_ptr, allegro_hand_actor, allegro_hand_dof_props)
+            hand_idx = self.gym.get_actor_index(env_ptr, allegro_hand_actor, gymapi.DOMAIN_SIM)
             self.hand_indices.append(hand_idx)
 
-            self.gym.set_actor_dof_properties(env_ptr, shadow_hand_another_actor, shadow_hand_another_dof_props)
-            another_hand_idx = self.gym.get_actor_index(env_ptr, shadow_hand_another_actor, gymapi.DOMAIN_SIM)
+            self.gym.set_actor_dof_properties(env_ptr, allegro_hand_another_actor, allegro_hand_another_dof_props)
+            another_hand_idx = self.gym.get_actor_index(env_ptr, allegro_hand_another_actor, gymapi.DOMAIN_SIM)
             self.another_hand_indices.append(another_hand_idx)
 
-            num_bodies = self.gym.get_actor_rigid_body_count(env_ptr, shadow_hand_actor)
+            num_bodies = self.gym.get_actor_rigid_body_count(env_ptr, allegro_hand_actor)
             hand_rigid_body_index = [[0,1,2,3], [4,5,6,7], [8,9,10,11], [12,13,14,15], [16,17,18,19,20], [21,22,23,24,25]]
 
             for n in self.agent_index[0]:
@@ -447,7 +437,7 @@ class ShadowHandBlockStack(VecTask):
                 colorz = random.uniform(0, 1)
                 for m in n:
                     for o in hand_rigid_body_index[m]:
-                        self.gym.set_rigid_body_color(env_ptr, shadow_hand_actor, o, gymapi.MESH_VISUAL,
+                        self.gym.set_rigid_body_color(env_ptr, allegro_hand_actor, o, gymapi.MESH_VISUAL,
                                                 gymapi.Vec3(colorx, colory, colorz))
             for n in self.agent_index[1]:
                 colorx = random.uniform(0, 1)
@@ -455,11 +445,11 @@ class ShadowHandBlockStack(VecTask):
                 colorz = random.uniform(0, 1)
                 for m in n:
                     for o in hand_rigid_body_index[m]:
-                        self.gym.set_rigid_body_color(env_ptr, shadow_hand_another_actor, o, gymapi.MESH_VISUAL,
+                        self.gym.set_rigid_body_color(env_ptr, allegro_hand_another_actor, o, gymapi.MESH_VISUAL,
                                                 gymapi.Vec3(colorx, colory, colorz))
 
-            self.gym.enable_actor_dof_force_sensors(env_ptr, shadow_hand_actor)
-            self.gym.enable_actor_dof_force_sensors(env_ptr, shadow_hand_another_actor)
+            self.gym.enable_actor_dof_force_sensors(env_ptr, allegro_hand_actor)
+            self.gym.enable_actor_dof_force_sensors(env_ptr, allegro_hand_another_actor)
 
             object_handle = self.gym.create_actor(env_ptr, block_asset, object_start_pose, "object", i, 0, 0)
             self.object_init_state.append([object_start_pose.p.x, object_start_pose.p.y, object_start_pose.p.z,
@@ -483,14 +473,14 @@ class ShadowHandBlockStack(VecTask):
             self.gym.set_actor_rigid_shape_properties(env_ptr, object_handle, object_shape_props)
             self.gym.set_actor_rigid_shape_properties(env_ptr, block_handle, block_shape_props)
 
-            hand_shape_props = self.gym.get_actor_rigid_shape_properties(env_ptr, shadow_hand_actor)
-            another_hand_shape_props = self.gym.get_actor_rigid_shape_properties(env_ptr, shadow_hand_another_actor)
+            hand_shape_props = self.gym.get_actor_rigid_shape_properties(env_ptr, allegro_hand_actor)
+            another_hand_shape_props = self.gym.get_actor_rigid_shape_properties(env_ptr, allegro_hand_another_actor)
             for object_shape_prop in hand_shape_props:
                 object_shape_prop.friction = 0.5
             for object_shape_prop in another_hand_shape_props:
                 object_shape_prop.friction = 0.5
-            self.gym.set_actor_rigid_shape_properties(env_ptr, shadow_hand_actor, hand_shape_props)
-            self.gym.set_actor_rigid_shape_properties(env_ptr, shadow_hand_another_actor, another_hand_shape_props)
+            self.gym.set_actor_rigid_shape_properties(env_ptr, allegro_hand_actor, hand_shape_props)
+            self.gym.set_actor_rigid_shape_properties(env_ptr, allegro_hand_another_actor, another_hand_shape_props)
 
             table_handle = self.gym.create_actor(env_ptr, table_asset, table_pose, "table", i, -1, 0)
             self.gym.set_rigid_body_texture(env_ptr, table_handle, 0, gymapi.MESH_VISUAL, table_texture_handle)
@@ -528,7 +518,7 @@ class ShadowHandBlockStack(VecTask):
                 self.gym.end_aggregate(env_ptr)
 
             self.envs.append(env_ptr)
-            self.shadow_hands.append(shadow_hand_actor)
+            self.allegro_hands.append(allegro_hand_actor)
 
         self.object_init_state = to_torch(self.object_init_state, device=self.device, dtype=torch.float).view(self.num_envs, 13)
         self.goal_states = self.object_init_state.clone()
@@ -667,10 +657,10 @@ class ShadowHandBlockStack(VecTask):
         num_ft_states = 13 * int(self.num_fingertips / 2)  # 65
         num_ft_force_torques = 6 * int(self.num_fingertips / 2)  # 30
 
-        self.obs_buf[:, 0:self.num_shadow_hand_dofs] = unscale(self.shadow_hand_dof_pos,
-                                                            self.shadow_hand_dof_lower_limits, self.shadow_hand_dof_upper_limits)
-        self.obs_buf[:, self.num_shadow_hand_dofs:2*self.num_shadow_hand_dofs] = self.vel_obs_scale * self.shadow_hand_dof_vel
-        self.obs_buf[:, 2*self.num_shadow_hand_dofs:3*self.num_shadow_hand_dofs] = self.force_torque_obs_scale * self.dof_force_tensor[:, :24]
+        self.obs_buf[:, 0:self.num_allegro_hand_dofs] = unscale(self.allegro_hand_dof_pos,
+                                                            self.allegro_hand_dof_lower_limits, self.allegro_hand_dof_upper_limits)
+        self.obs_buf[:, self.num_allegro_hand_dofs:2*self.num_allegro_hand_dofs] = self.vel_obs_scale * self.allegro_hand_dof_vel
+        self.obs_buf[:, 2*self.num_allegro_hand_dofs:3*self.num_allegro_hand_dofs] = self.force_torque_obs_scale * self.dof_force_tensor[:, :16]
 
         fingertip_obs_start = 72  # 168 = 157 + 11
         self.obs_buf[:, fingertip_obs_start:fingertip_obs_start + num_ft_states] = self.fingertip_state.reshape(self.num_envs, num_ft_states)
@@ -687,10 +677,10 @@ class ShadowHandBlockStack(VecTask):
         self.obs_buf[:, action_obs_start:action_obs_start + 26] = self.actions[:, :26]
 
         another_hand_start = action_obs_start + 26
-        self.obs_buf[:, another_hand_start:self.num_shadow_hand_dofs + another_hand_start] = unscale(self.shadow_hand_another_dof_pos,
-                                                            self.shadow_hand_dof_lower_limits, self.shadow_hand_dof_upper_limits)
-        self.obs_buf[:, self.num_shadow_hand_dofs + another_hand_start:2*self.num_shadow_hand_dofs + another_hand_start] = self.vel_obs_scale * self.shadow_hand_another_dof_vel
-        self.obs_buf[:, 2*self.num_shadow_hand_dofs + another_hand_start:3*self.num_shadow_hand_dofs + another_hand_start] = self.force_torque_obs_scale * self.dof_force_tensor[:, 24:48]
+        self.obs_buf[:, another_hand_start:self.num_allegro_hand_dofs + another_hand_start] = unscale(self.allegro_hand_another_dof_pos,
+                                                            self.allegro_hand_dof_lower_limits, self.allegro_hand_dof_upper_limits)
+        self.obs_buf[:, self.num_allegro_hand_dofs + another_hand_start:2*self.num_allegro_hand_dofs + another_hand_start] = self.vel_obs_scale * self.allegro_hand_another_dof_vel
+        self.obs_buf[:, 2*self.num_allegro_hand_dofs + another_hand_start:3*self.num_allegro_hand_dofs + another_hand_start] = self.force_torque_obs_scale * self.dof_force_tensor[:, 16:32]
 
         fingertip_another_obs_start = another_hand_start + 72
         self.obs_buf[:, fingertip_another_obs_start:fingertip_another_obs_start + num_ft_states] = self.fingertip_another_state.reshape(self.num_envs, num_ft_states)
@@ -721,10 +711,10 @@ class ShadowHandBlockStack(VecTask):
         num_ft_states = 13 * int(self.num_fingertips / 2)  # 65
         num_ft_force_torques = 6 * int(self.num_fingertips / 2)  # 30
 
-        self.obs_buf[:, 0:self.num_shadow_hand_dofs] = unscale(self.shadow_hand_dof_pos,
-                                                            self.shadow_hand_dof_lower_limits, self.shadow_hand_dof_upper_limits)
-        self.obs_buf[:, self.num_shadow_hand_dofs:2*self.num_shadow_hand_dofs] = self.vel_obs_scale * self.shadow_hand_dof_vel
-        self.obs_buf[:, 2*self.num_shadow_hand_dofs:3*self.num_shadow_hand_dofs] = self.force_torque_obs_scale * self.dof_force_tensor[:, :24]
+        self.obs_buf[:, 0:self.num_allegro_hand_dofs] = unscale(self.allegro_hand_dof_pos,
+                                                            self.allegro_hand_dof_lower_limits, self.allegro_hand_dof_upper_limits)
+        self.obs_buf[:, self.num_allegro_hand_dofs:2*self.num_allegro_hand_dofs] = self.vel_obs_scale * self.allegro_hand_dof_vel
+        self.obs_buf[:, 2*self.num_allegro_hand_dofs:3*self.num_allegro_hand_dofs] = self.force_torque_obs_scale * self.dof_force_tensor[:, :16]
 
         fingertip_obs_start = 72  # 168 = 157 + 11
         self.obs_buf[:, fingertip_obs_start:fingertip_obs_start + num_ft_states] = self.fingertip_state.reshape(self.num_envs, num_ft_states)
@@ -741,10 +731,10 @@ class ShadowHandBlockStack(VecTask):
         self.obs_buf[:, action_obs_start:action_obs_start + 26] = self.actions[:, :26]
 
         another_hand_start = action_obs_start + 26
-        self.obs_buf[:, another_hand_start:self.num_shadow_hand_dofs + another_hand_start] = unscale(self.shadow_hand_another_dof_pos,
-                                                            self.shadow_hand_dof_lower_limits, self.shadow_hand_dof_upper_limits)
-        self.obs_buf[:, self.num_shadow_hand_dofs + another_hand_start:2*self.num_shadow_hand_dofs + another_hand_start] = self.vel_obs_scale * self.shadow_hand_another_dof_vel
-        self.obs_buf[:, 2*self.num_shadow_hand_dofs + another_hand_start:3*self.num_shadow_hand_dofs + another_hand_start] = self.force_torque_obs_scale * self.dof_force_tensor[:, 24:48]
+        self.obs_buf[:, another_hand_start:self.num_allegro_hand_dofs + another_hand_start] = unscale(self.allegro_hand_another_dof_pos,
+                                                            self.allegro_hand_dof_lower_limits, self.allegro_hand_dof_upper_limits)
+        self.obs_buf[:, self.num_allegro_hand_dofs + another_hand_start:2*self.num_allegro_hand_dofs + another_hand_start] = self.vel_obs_scale * self.allegro_hand_another_dof_vel
+        self.obs_buf[:, 2*self.num_allegro_hand_dofs + another_hand_start:3*self.num_allegro_hand_dofs + another_hand_start] = self.force_torque_obs_scale * self.dof_force_tensor[:, 16:32]
 
         fingertip_another_obs_start = another_hand_start + 72
         self.obs_buf[:, fingertip_another_obs_start:fingertip_another_obs_start + num_ft_states] = self.fingertip_another_state.reshape(self.num_envs, num_ft_states)
@@ -826,7 +816,7 @@ class ShadowHandBlockStack(VecTask):
         if self.randomize:
             self.apply_randomizations(self.randomization_params)
 
-        rand_floats = torch_rand_float(-1.0, 1.0, (len(env_ids), self.num_shadow_hand_dofs * 2 + 5), device=self.device)
+        rand_floats = torch_rand_float(-1.0, 1.0, (len(env_ids), self.num_allegro_hand_dofs * 2 + 5), device=self.device)
 
         self.reset_target_pose(env_ids)
 
@@ -848,26 +838,26 @@ class ShadowHandBlockStack(VecTask):
                                                  self.goal_object_indices[env_ids],
                                                  self.goal_object_indices[goal_env_ids]]).to(torch.int32))
 
-        delta_max = self.shadow_hand_dof_upper_limits - self.shadow_hand_dof_default_pos
-        delta_min = self.shadow_hand_dof_lower_limits - self.shadow_hand_dof_default_pos
-        rand_delta = delta_min + (delta_max - delta_min) * rand_floats[:, 5:5+self.num_shadow_hand_dofs]
+        delta_max = self.allegro_hand_dof_upper_limits - self.allegro_hand_dof_default_pos
+        delta_min = self.allegro_hand_dof_lower_limits - self.allegro_hand_dof_default_pos
+        rand_delta = delta_min + (delta_max - delta_min) * rand_floats[:, 5:5+self.num_allegro_hand_dofs]
 
-        pos = self.shadow_hand_default_dof_pos + self.reset_dof_pos_noise * rand_delta
+        pos = self.allegro_hand_default_dof_pos + self.reset_dof_pos_noise * rand_delta
 
-        self.shadow_hand_dof_pos[env_ids, :] = pos
-        self.shadow_hand_another_dof_pos[env_ids, :] = pos
+        self.allegro_hand_dof_pos[env_ids, :] = pos
+        self.allegro_hand_another_dof_pos[env_ids, :] = pos
 
-        self.shadow_hand_dof_vel[env_ids, :] = self.shadow_hand_dof_default_vel + \
-            self.reset_dof_vel_noise * rand_floats[:, 5+self.num_shadow_hand_dofs:5+self.num_shadow_hand_dofs*2]
+        self.allegro_hand_dof_vel[env_ids, :] = self.allegro_hand_dof_default_vel + \
+            self.reset_dof_vel_noise * rand_floats[:, 5+self.num_allegro_hand_dofs:5+self.num_allegro_hand_dofs*2]
 
-        self.shadow_hand_another_dof_vel[env_ids, :] = self.shadow_hand_dof_default_vel + \
-            self.reset_dof_vel_noise * rand_floats[:, 5+self.num_shadow_hand_dofs:5+self.num_shadow_hand_dofs*2]
+        self.allegro_hand_another_dof_vel[env_ids, :] = self.allegro_hand_dof_default_vel + \
+            self.reset_dof_vel_noise * rand_floats[:, 5+self.num_allegro_hand_dofs:5+self.num_allegro_hand_dofs*2]
 
-        self.prev_targets[env_ids, :self.num_shadow_hand_dofs] = pos
-        self.cur_targets[env_ids, :self.num_shadow_hand_dofs] = pos
+        self.prev_targets[env_ids, :self.num_allegro_hand_dofs] = pos
+        self.cur_targets[env_ids, :self.num_allegro_hand_dofs] = pos
 
-        self.prev_targets[env_ids, self.num_shadow_hand_dofs:self.num_shadow_hand_dofs*2] = pos
-        self.cur_targets[env_ids, self.num_shadow_hand_dofs:self.num_shadow_hand_dofs*2] = pos
+        self.prev_targets[env_ids, self.num_allegro_hand_dofs:self.num_allegro_hand_dofs*2] = pos
+        self.cur_targets[env_ids, self.num_allegro_hand_dofs:self.num_allegro_hand_dofs*2] = pos
 
         hand_indices = self.hand_indices[env_ids].to(torch.int32)
         another_hand_indices = self.another_hand_indices[env_ids].to(torch.int32)
@@ -915,23 +905,23 @@ class ShadowHandBlockStack(VecTask):
 
         self.actions = actions.clone().to(self.device)
         if self.use_relative_control:
-            targets = self.prev_targets[:, self.actuated_dof_indices] + self.shadow_hand_dof_speed_scale * self.dt * self.actions
+            targets = self.prev_targets[:, self.actuated_dof_indices] + self.allegro_dof_speed_scale * self.dt * self.actions
             self.cur_targets[:, self.actuated_dof_indices] = tensor_clamp(targets,
-                                                                          self.shadow_hand_dof_lower_limits[self.actuated_dof_indices], self.shadow_hand_dof_upper_limits[self.actuated_dof_indices])
+                                                                          self.allegro_hand_dof_lower_limits[self.actuated_dof_indices], self.allegro_hand_dof_upper_limits[self.actuated_dof_indices])
         else:
-            self.cur_targets[:, self.actuated_dof_indices] = scale(self.actions[:, 6:26],
-                                                                   self.shadow_hand_dof_lower_limits[self.actuated_dof_indices], self.shadow_hand_dof_upper_limits[self.actuated_dof_indices])
+            self.cur_targets[:, self.actuated_dof_indices] = scale(self.actions[:, 6:22],
+                                                                   self.allegro_hand_dof_lower_limits[self.actuated_dof_indices], self.allegro_hand_dof_upper_limits[self.actuated_dof_indices])
             self.cur_targets[:, self.actuated_dof_indices] = self.act_moving_average * self.cur_targets[:,
                                                                                                         self.actuated_dof_indices] + (1.0 - self.act_moving_average) * self.prev_targets[:, self.actuated_dof_indices]
             self.cur_targets[:, self.actuated_dof_indices] = tensor_clamp(self.cur_targets[:, self.actuated_dof_indices],
-                                                                          self.shadow_hand_dof_lower_limits[self.actuated_dof_indices], self.shadow_hand_dof_upper_limits[self.actuated_dof_indices])
+                                                                          self.allegro_hand_dof_lower_limits[self.actuated_dof_indices], self.allegro_hand_dof_upper_limits[self.actuated_dof_indices])
 
-            self.cur_targets[:, self.actuated_dof_indices + 24] = scale(self.actions[:, 32:52],
-                                                                   self.shadow_hand_dof_lower_limits[self.actuated_dof_indices], self.shadow_hand_dof_upper_limits[self.actuated_dof_indices])
-            self.cur_targets[:, self.actuated_dof_indices + 24] = self.act_moving_average * self.cur_targets[:,
-                                                                                                        self.actuated_dof_indices + 24] + (1.0 - self.act_moving_average) * self.prev_targets[:, self.actuated_dof_indices]
-            self.cur_targets[:, self.actuated_dof_indices + 24] = tensor_clamp(self.cur_targets[:, self.actuated_dof_indices + 24],
-                                                                          self.shadow_hand_dof_lower_limits[self.actuated_dof_indices], self.shadow_hand_dof_upper_limits[self.actuated_dof_indices])
+            self.cur_targets[:, self.actuated_dof_indices + 16] = scale(self.actions[:, 22:38],
+                                                                   self.allegro_hand_dof_lower_limits[self.actuated_dof_indices], self.allegro_hand_dof_upper_limits[self.actuated_dof_indices])
+            self.cur_targets[:, self.actuated_dof_indices + 16] = self.act_moving_average * self.cur_targets[:,
+                                                                                                        self.actuated_dof_indices + 16] + (1.0 - self.act_moving_average) * self.prev_targets[:, self.actuated_dof_indices]
+            self.cur_targets[:, self.actuated_dof_indices + 16] = tensor_clamp(self.cur_targets[:, self.actuated_dof_indices + 16],
+                                                                          self.allegro_hand_dof_lower_limits[self.actuated_dof_indices], self.allegro_hand_dof_upper_limits[self.actuated_dof_indices])
 
             self.apply_forces[:, 1, :] = actions[:, 0:3] * self.dt * self.transition_scale * 100000
             self.apply_forces[:, 1 + 26, :] = actions[:, 26:29] * self.dt * self.transition_scale * 100000
@@ -941,7 +931,7 @@ class ShadowHandBlockStack(VecTask):
             self.gym.apply_rigid_body_force_tensors(self.sim, gymtorch.unwrap_tensor(self.apply_forces), gymtorch.unwrap_tensor(self.apply_torque), gymapi.ENV_SPACE)
 
         self.prev_targets[:, self.actuated_dof_indices] = self.cur_targets[:, self.actuated_dof_indices]
-        self.prev_targets[:, self.actuated_dof_indices + 24] = self.cur_targets[:, self.actuated_dof_indices + 24]
+        self.prev_targets[:, self.actuated_dof_indices + 16] = self.cur_targets[:, self.actuated_dof_indices + 16]
 
         all_hand_indices = torch.unique(torch.cat([self.hand_indices,
                                             self.another_hand_indices]).to(torch.int32))
