@@ -29,9 +29,15 @@ env:
 
 ```
 
+---
+
+if you use conda environments, you have to run `export LD_LIBRARY_PATH=/home/avery/anaconda3/envs/eureka/lib` first.
+
+---
+
 Looking at the code, I can trace through how many times the LLM is called with your specific command parameters.
 
-Let me analyze the key parts: Based on your command `python eureka.py env=allegro_hand sample=4 iteration=2 model=gpt-4 capture_video`, here's the analysis:
+Let me analyze the key parts: Based on your command `python eureka.py env=allegro_hand sample=4 iteration=2 model=gpt-4-turbo-2024-04-09 capture_video=True`, here's the analysis:
 
 ## **LLM API Call Calculation**
 

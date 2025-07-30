@@ -343,7 +343,7 @@ class AllegroHandGPT(VecTask):
         self.goal_object_indices = to_torch(self.goal_object_indices, dtype=torch.long, device=self.device)
 
     def compute_reward(self, actions):
-        self.rew_buf[:], self.rew_dict = compute_reward(self.object_rot, self.goal_rot)
+        self.rew_buf[:], self.rew_dict = compute_reward(self.object_rot, self.goal_rot, self.object_angvel, self.actions)
         self.extras['gpt_reward'] = self.rew_buf.mean()
         for rew_state in self.rew_dict: self.extras[rew_state] = self.rew_dict[rew_state].mean()
         self.rew_buf[:] = compute_bonus(
@@ -703,6 +703,50 @@ import math
 import torch
 from torch import Tensor
 @torch.jit.script
-def compute_reward(object_rot: torch.Tensor, goal_rot: torch.Tensor) -> Tuple[torch.Tensor, Dict[str, torch.Tensor]]:
-    reward = torch.dot(object_rot, goal_rot)**2
-    return reward, {'angular_similarity': reward}
+def compute_reward(
+    object_rot: torch.Tensor,     # quaternion (x, y, z, w) of the object [N,4]
+    goal_rot: torch.Tensor,       # target quaternion [N,4]
+    object_angvel: torch.Tensor,  # angular velocity of the object [N,3]
+    actions: torch.Tensor         # actuator commands [N, num_actions]
+) -> Tuple[torch.Tensor, Dict[str, torch.Tensor]]:
+    """
+    Reward for spinning the object to a desired orientation.
+    Components:
+      - orient_reward: encourages alignment of object_rot with goal_rot
+      - spin_reward: encourages non-zero angular velocity (to actually spin)
+      - action_penalty: small penalty on large actions
+    """
+
+    # === hyper-parameters ===
+    orient_temp: float = 8.0       # temperature for orientation exp transform
+    orient_weight: float = 0.6     # weight of orientation component
+    spin_temp: float = 2.0         # temperature for spin tanh
+    spin_weight: float = 0.4       # weight of spin component
+    action_penalty_coeff: float = 0.001
+
+    # --- 1) orientation alignment via quaternion dot product ---
+    # dot = cos(theta/2)  when both quaternions normalized
+    # take absolute value so orientation and 180° flipped give same reward
+    cos_half: torch.Tensor = torch.abs(torch.sum(object_rot * goal_rot, dim=-1))
+    # transform to [0,1] with sharper gradient near perfect alignment
+    orient_reward: torch.Tensor = torch.exp(orient_temp * (cos_half - 1.0))
+
+    # --- 2) spin rate reward: encourage angular motion ---
+    spin_rate: torch.Tensor = torch.norm(object_angvel, p=2, dim=-1)
+    spin_reward: torch.Tensor = torch.tanh(spin_temp * spin_rate)
+
+    # --- 3) small penalty on squared actions for smoother control ---
+    action_penalty: torch.Tensor = -action_penalty_coeff * torch.sum(actions * actions, dim=-1)
+
+    # --- total reward ---
+    reward: torch.Tensor = (
+        orient_weight * orient_reward
+        + spin_weight * spin_reward
+        + action_penalty
+    )
+
+    return reward, {
+        "orient_reward": orient_reward,
+        "spin_reward": spin_reward,
+        "action_penalty": action_penalty
+    }
