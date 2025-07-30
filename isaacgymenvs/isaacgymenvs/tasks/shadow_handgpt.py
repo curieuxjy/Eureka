@@ -764,17 +764,17 @@ import torch
 from torch import Tensor
 @torch.jit.script
 def compute_reward(object_rot: torch.Tensor, goal_rot: torch.Tensor, object_angvel: torch.Tensor) -> Tuple[torch.Tensor, Dict[str, torch.Tensor]]:
-    # Define temperature parameters for the transformation functions
-    temperature_rot = torch.tensor(0.1)
-    temperature_angvel = torch.tensor(0.1)
+    # Update temperature parameters for the transformation functions
+    temperature_rot = torch.tensor(0.01)   # Decreased temperature_rot to make rot_reward more sensitive
+    temperature_angvel = torch.tensor(1.0)  # Increased temperature_angvel to make velocity_penalty less impactful
 
     # Compute the distance between the current and goal orientations
     rot_diff = torch.norm(object_rot - goal_rot, dim=-1)
 
-    # We want to encourage the agent to spin the object, so we will give a negative reward proportional to the angular velocity
+    # We still want to discourage excessive spinning, with a milder penalty
     angvel_penalty = torch.norm(object_angvel, dim=-1)
 
-    # Now we transform the reward components using the exponential function
+    # Transform the penalty and rewards using the exponential function
     rot_reward = torch.exp(-temperature_rot * rot_diff)
     velocity_penalty = torch.exp(-temperature_angvel * angvel_penalty)
 

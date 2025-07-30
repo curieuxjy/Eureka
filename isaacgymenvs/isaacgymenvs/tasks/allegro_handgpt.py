@@ -343,7 +343,7 @@ class AllegroHandGPT(VecTask):
         self.goal_object_indices = to_torch(self.goal_object_indices, dtype=torch.long, device=self.device)
 
     def compute_reward(self, actions):
-        self.rew_buf[:], self.rew_dict = compute_reward(self.object_rot, self.goal_rot, self.object_angvel)
+        self.rew_buf[:], self.rew_dict = compute_reward(self.object_rot, self.goal_rot)
         self.extras['gpt_reward'] = self.rew_buf.mean()
         for rew_state in self.rew_dict: self.extras[rew_state] = self.rew_dict[rew_state].mean()
         self.rew_buf[:] = compute_bonus(
@@ -703,36 +703,6 @@ import math
 import torch
 from torch import Tensor
 @torch.jit.script
-def compute_reward(object_rot: torch.Tensor, goal_rot: torch.Tensor, object_angvel: torch.Tensor) -> Tuple[torch.Tensor, Dict[str, torch.Tensor]]:
-    object_rot_norm = torch.linalg.norm(object_rot, dim=-1)
-    goal_rot_norm = torch.linalg.norm(goal_rot, dim=-1)
-
-    # normalize the rotations
-    object_rot_normalized = object_rot / object_rot_norm.unsqueeze(-1)
-    goal_rot_normalized = goal_rot / goal_rot_norm.unsqueeze(-1)
-
-    # compute the distance between the orientations
-    rotation_distance = 1.0 - (object_rot_normalized * goal_rot_normalized).sum(dim=-1)
-
-    # we want to minimize the rotational distance, so the reward is the negative distance
-    rotation_reward = -rotation_distance
-
-    # calculate angular speed reward
-    angular_speed = torch.linalg.norm(object_angvel, dim=-1)
-    # add reward for faster spins
-    speed_reward = angular_speed
-    
-    # consider the spinning direction, reduce the reward if the spinning direction is wrong
-    correct_direction = (object_rot_normalized[1:] * goal_rot_normalized[1:]).sum(dim=-1)
-    speed_reward = speed_reward * torch.sign(correct_direction)
-    
-    # normalize speed reward to [0, 1] range
-    speed_reward = (speed_reward - speed_reward.min()) / (speed_reward.max() - speed_reward.min())
-
-    reward_components = {
-        "rotation_reward": rotation_reward,
-        "speed_reward": speed_reward
-    }
-    total_reward = rotation_reward + speed_reward
-
-    return total_reward, reward_components
+def compute_reward(object_rot: torch.Tensor, goal_rot: torch.Tensor) -> Tuple[torch.Tensor, Dict[str, torch.Tensor]]:
+    reward = torch.dot(object_rot, goal_rot)**2
+    return reward, {'angular_similarity': reward}
